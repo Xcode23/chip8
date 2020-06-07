@@ -1,16 +1,14 @@
 import SDL
 import SDL.Mixer as Mixer
-import Linear (V4(..))
-import Data.StateVar 
 import qualified Data.Text as T
-import Control.Monad
 import qualified Data.ByteString as BS
 import qualified Data.Word as W
 import Data.Bits as B
-import Text.Printf
-import qualified Data.Vector.Storable as V
-import qualified Data.Vector.Storable.Mutable as VM
---import qualified Data.Vector.Mutable as VMM
+import qualified Data.Vector.Storable as VS
+import qualified Data.Vector.Storable.Mutable as VSM
+import qualified Data.Vector as V
+import Lib
+import Control.Monad
 
 
 
@@ -26,26 +24,53 @@ main = --load "/home/bass/chip8/app/TETRIS" >>= print . V.length
   prepareAudio
   sound <- Mixer.load "/home/bass/chip8/app/sound.wav"
   play sound
-  mainLoop False renderer
+  ticks <- SDL.ticks 
+  let chip = startChip (V.replicate 10 0) ticks
+  mainLoop False chip 0 renderer
   closeAudio
   SDL.quit
 
-mainLoop :: Bool -> Renderer -> IO ()
-mainLoop True _ = return ()
-mainLoop False renderer = do
+mainLoop :: Bool -> ChipState -> Int -> Renderer -> IO ()
+mainLoop True _ _ _ = return ()
+mainLoop False chip accumulator renderer = do
+  SDL.delay 1 -- slight delay to help controlTimings keep up
   events <- pollEvents
   keyState <- getKeyboardState
+  newTicks <- controlTimings (timer chip)
+  let updatedChip = updateTimers newTicks chip 
   screenData <- if keyState ScancodeA
     then test
     else test2
+  updateScreen screenData renderer
+  printFps accumulator
+  mainLoop (keyState ScancodeEscape) updatedChip (accumulator+1) renderer
+
+controlTimings :: W.Word32 -> IO W.Word32
+controlTimings previousTicks = do
+  newTicks <- SDL.ticks
+  let maxIntendedDelay = ceiling ((1.0 / 60.0) * 1000.0)
+      tickDifference = newTicks - previousTicks
+      condition = maxIntendedDelay - tickDifference < maxIntendedDelay && -- checks that tickDifference is positive
+                    maxIntendedDelay - tickDifference > 0                 -- checks that ticks difference is smaller than maxIntendedDelay
+  when condition $ SDL.delay (maxIntendedDelay - tickDifference)
+  SDL.ticks
+
+updateScreen :: VSM.IOVector W.Word8 -> Renderer -> IO ()
+updateScreen screenData renderer = do
   surface <- createRGBSurfaceFrom screenData (V2 4 4) 16 RGBA8888
   texture <- createTextureFromSurface renderer surface
   clear renderer
   copy renderer texture Nothing Nothing
   present renderer
-  delay 20
-  keyState <- getKeyboardState
-  mainLoop (keyState ScancodeEscape) renderer
+
+printFps :: Int -> IO ()
+printFps frames = do
+  testTicks <- SDL.ticks
+  let secs = fromIntegral testTicks / 1000.0 :: Float
+      fps = fromIntegral frames / secs :: Float
+  --print secs
+  --print frames
+  print ("FPS:" ++ show fps)
 
 prepareAudio :: IO ()
 prepareAudio = do
@@ -61,16 +86,16 @@ prepareRenderer = do
 toWord16 :: W.Word8 -> W.Word8 -> W.Word16
 toWord16 x y = fromInteger $ shiftL (fromIntegral x) 8 .|. fromIntegral y
 
-load :: String -> IO (V.Vector W.Word8)
+load :: String -> IO (VS.Vector W.Word8)
 load file = do
   content <- BS.readFile file
   let listFile = BS.unpack content
       listMemory = replicate 512 0 ++ listFile ++ replicate (4096 - (512 + length listFile)) 0
-   in return $ V.fromList listMemory
+   in return $ VS.fromList listMemory
 
 --dummy surfaces for testing
-test :: IO (VM.IOVector W.Word8)
-test = V.thaw $ V.fromList [255,255,255,255,0,0,0,0,255,255,255,255,0,0,0,0,0,0,0,0,255,255,255,255,0,0,0,0,255,255,255,255,255,255,255,255,0,0,0,0,255,255,255,255,0,0,0,0,0,0,0,0,255,255,255,255,0,0,0,0,255,255,255,255]
+test :: IO (VSM.IOVector W.Word8)
+test = VS.thaw $ VS.fromList [255,255,255,255,0,0,0,0,255,255,255,255,0,0,0,0,0,0,0,0,255,255,255,255,0,0,0,0,255,255,255,255,255,255,255,255,0,0,0,0,255,255,255,255,0,0,0,0,0,0,0,0,255,255,255,255,0,0,0,0,255,255,255,255]
 
-test2 :: IO (VM.IOVector W.Word8)
-test2 = V.thaw $ V.fromList [0,0,0,0,255,255,255,255,0,0,0,0,255,255,255,255,255,255,255,255,0,0,0,0,255,255,255,255,0,0,0,0,0,0,0,0,255,255,255,255,0,0,0,0,255,255,255,255,255,255,255,255,0,0,0,0,255,255,255,255,0,0,0,0]
+test2 :: IO (VSM.IOVector W.Word8)
+test2 = VS.thaw $ VS.fromList [0,0,0,0,255,255,255,255,0,0,0,0,255,255,255,255,255,255,255,255,0,0,0,0,255,255,255,255,0,0,0,0,0,0,0,0,255,255,255,255,0,0,0,0,255,255,255,255,255,255,255,255,0,0,0,0,255,255,255,255,0,0,0,0]
