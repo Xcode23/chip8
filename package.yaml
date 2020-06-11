@@ -24,8 +24,6 @@ dependencies:
 - sdl2
 - sdl2-mixer
 - text
-- linear
-- StateVar
 - bytestring
 - vector
 library:
