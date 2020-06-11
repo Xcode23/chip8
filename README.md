@@ -5,7 +5,7 @@ A chip8 emulator written in haskell, sdl2 library for graphics, sound and user i
 ## TODO
  - [x] Capping frame rate
  - [ ] Make executable stand-alone (no extra files besides the games)
- - [ ] Mutable vectors for performance
+ - [x] Mutable vectors for performance
 
 ## Resources
  - [SDL wiki](https://wiki.libsdl.org/)

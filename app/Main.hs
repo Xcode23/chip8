@@ -9,6 +9,8 @@ import qualified Data.Vector.Storable.Mutable as VSM
 import qualified Data.Vector as V
 import Lib
 import Control.Monad
+--import Numeric (showHex, showIntAtBase)
+--import Data.Char (intToDigit)
 
 
 
@@ -25,7 +27,7 @@ main = --load "/home/bass/chip8/app/TETRIS" >>= print . V.length
   sound <- Mixer.load "/home/bass/chip8/app/sound.wav"
   play sound
   ticks <- SDL.ticks 
-  let chip = startChip (V.replicate 10 0) ticks
+  let chip = startChip ticks
   mainLoop False chip 0 renderer
   closeAudio
   SDL.quit
@@ -34,7 +36,7 @@ mainLoop :: Bool -> ChipState -> Int -> Renderer -> IO ()
 mainLoop True _ _ _ = return ()
 mainLoop False chip accumulator renderer = do
   SDL.delay 1 -- slight delay to help controlTimings keep up
-  events <- pollEvents
+  pumpEvents
   keyState <- getKeyboardState
   newTicks <- controlTimings (timer chip)
   let updatedChip = updateTimers newTicks chip 
@@ -85,13 +87,10 @@ prepareRenderer = do
 
 toWord16 :: W.Word8 -> W.Word8 -> W.Word16
 toWord16 x y = fromInteger $ shiftL (fromIntegral x) 8 .|. fromIntegral y
+--print $ showHex (0x8154 `mod` 0x0100) ""
 
-load :: String -> IO (VS.Vector W.Word8)
-load file = do
-  content <- BS.readFile file
-  let listFile = BS.unpack content
-      listMemory = replicate 512 0 ++ listFile ++ replicate (4096 - (512 + length listFile)) 0
-   in return $ VS.fromList listMemory
+loadGameFile :: String -> IO BS.ByteString
+loadGameFile = BS.readFile
 
 --dummy surfaces for testing
 test :: IO (VSM.IOVector W.Word8)
