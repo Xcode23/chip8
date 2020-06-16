@@ -10,6 +10,7 @@ import qualified Data.Vector.Unboxed.Mutable as VM
 import qualified Data.Word as W
 import qualified Data.ByteString as BS
 import Control.Monad.ST
+import Control.Monad
 import SDL
 import SDL.Internal.Numbered
 
@@ -17,7 +18,7 @@ data ChipState = Chip {
                         registers :: V.Vector W.Word8, -- 16 registers
                         index :: W.Word16, 
                         delayTimer :: W.Word8,
-                        soundTimer :: W.Word8,
+                        soundTimer :: W.Word32,
                         timer :: W.Word32,
                         pc :: W.Word16,
                         sp :: W.Word8,
@@ -27,13 +28,15 @@ data ChipState = Chip {
                         memory :: V.Vector W.Word8 -- 4096 bytes
                       } deriving (Show)
 
+tickDuration = ceiling (1.0 / 60.0 * 1000.0)
+
 startChip :: W.Word32 -> ChipState
 startChip startingTimer = 
   Chip {
         registers = V.replicate 16 0,
         index = 0, 
         delayTimer = 0,
-        soundTimer = 0,
+        soundTimer = 3600,
         timer = startingTimer,
         pc = 0x200,
         sp = 0,
@@ -43,15 +46,30 @@ startChip startingTimer =
         memory = V.replicate 4096 0
        }
 
-updateTimers :: W.Word32 -> ChipState -> ChipState
-updateTimers newTime chip =
-    let tick = ceiling (1.0 / 60.0 * 1000.0)
-        oldTime = timer chip
-        shouldUpdate = newTime > oldTime && newTime - tick >= oldTime
-        updatedTimer = if shouldUpdate then newTime else oldTime
-        newDelay = if newDelay > 0 && shouldUpdate then delayTimer chip - 1 else delayTimer chip
-        newSound = if newSound > 0 && shouldUpdate then soundTimer chip - 1 else soundTimer chip
-      in chip { timer = updatedTimer, delayTimer = newDelay, soundTimer = newSound }
+updateTimers :: ChipState -> IO ChipState
+updateTimers chip = do
+    newTime <- SDL.ticks
+    when (soundTimer chip == 0) (print $ fromIntegral newTime / 1000.0)
+    let oldTime = timer chip
+        shouldUpdate = newTime > oldTime && newTime - tickDuration >= oldTime
+      in  if shouldUpdate 
+          then return $ auxUpdateTimers newTime chip
+          else return chip
+
+auxUpdateTimers :: W.Word32 -> ChipState -> ChipState
+auxUpdateTimers newTime chip =
+  let oldTime = timer chip
+      updatedTimer = newTime - (newTime `mod` tickDuration)
+      decrementValue = div (newTime - oldTime) tickDuration
+      newDelay = decrementTimer (delayTimer chip) decrementValue
+      newSound = decrementTimer (soundTimer chip) decrementValue
+    in chip { timer = updatedTimer, delayTimer = newDelay, soundTimer = newSound }
+
+decrementTimer :: (Ord a, Num a, Integral b) => a -> b -> a
+decrementTimer oldTimer decrementValue =
+  if oldTimer > 0
+    then max 0 oldTimer - fromIntegral decrementValue
+    else oldTimer
 
 updateKeypad :: (Scancode -> Bool) -> ChipState -> ChipState
 updateKeypad keyState chip = chip { keypad = newKeys }

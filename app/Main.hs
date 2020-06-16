@@ -39,12 +39,12 @@ mainLoop False chip accumulator renderer = do
   pumpEvents
   keyState <- getKeyboardState
   newTicks <- controlTimings (timer chip)
-  let updatedChip = updateTimers newTicks chip 
+  updatedChip <- updateTimers chip 
   screenData <- if keyState ScancodeA
     then test
     else test2
   updateScreen screenData renderer
-  printFps accumulator
+  --printFps accumulator
   mainLoop (keyState ScancodeEscape) updatedChip (accumulator+1) renderer
 
 controlTimings :: W.Word32 -> IO W.Word32
