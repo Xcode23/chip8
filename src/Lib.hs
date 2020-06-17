@@ -43,7 +43,7 @@ startChip startingTimer =
         gfx = V.replicate 8192 False,
         keypad = V.replicate 16 False,
         stack = V.replicate 16 0,
-        memory = V.replicate 4096 0
+        memory = V.concat [fontSet, V.replicate (4096 - V.length fontSet) 0]
        }
 
 updateTimers :: ChipState -> IO ChipState
@@ -88,52 +88,59 @@ loadGame game chip = chip { memory = newMemory }
   --  in chip { memory = V.fromList listMemory } 
 
 interpretOpCode :: W.Word16 -> ChipState -> ChipState
-interpretOpCode opCode chip
-  | opCode == 0x00E0                      = chip
-  | opCode == 0x00EE                      = chip
-  | opCode >= 0x0000 && opCode <= 0x0FFF  = chip --noOp
-  | opCode >= 0x1000 && opCode <= 0x1FFF  = chip
-  | opCode >= 0x2000 && opCode <= 0x2FFF  = chip
-  | opCode >= 0x3000 && opCode <= 0x3FFF  = chip
-  | opCode >= 0x4000 && opCode <= 0x4FFF  = chip
-  | opCode >= 0x5000 && opCode <= 0x5FFF  = chip
-  | opCode >= 0x6000 && opCode <= 0x6FFF  = chip
-  | opCode >= 0x7000 && opCode <= 0x7FFF  = chip
+interpretOpCode opCode
+  | opCode == 0x00E0                      = clearDisplay
+  | opCode == 0x00EE                      = chipReturn
+  | opCode >= 0x0000 && opCode <= 0x0FFF  = id --noOp
+  | opCode >= 0x1000 && opCode <= 0x1FFF  = id
+  | opCode >= 0x2000 && opCode <= 0x2FFF  = id
+  | opCode >= 0x3000 && opCode <= 0x3FFF  = id
+  | opCode >= 0x4000 && opCode <= 0x4FFF  = id
+  | opCode >= 0x5000 && opCode <= 0x5FFF  = id
+  | opCode >= 0x6000 && opCode <= 0x6FFF  = id
+  | opCode >= 0x7000 && opCode <= 0x7FFF  = id
   | opCode >= 0x8000 && opCode <= 0x8FFF  = 
       case opCode `mod` 0x10 of
-        0x0 -> chip
-        0x1 -> chip
-        0x2 -> chip
-        0x3 -> chip
-        0x4 -> chip
-        0x5 -> chip
-        0x6 -> chip
-        0x7 -> chip
-        0xE -> chip
-        _   -> chip
-  | opCode >= 0x9000 && opCode <= 0x9FFF  = chip
-  | opCode >= 0xA000 && opCode <= 0xAFFF  = chip
-  | opCode >= 0xB000 && opCode <= 0xBFFF  = chip
-  | opCode >= 0xC000 && opCode <= 0xCFFF  = chip
-  | opCode >= 0xD000 && opCode <= 0xDFFF  = chip
+        0x0 -> id
+        0x1 -> id
+        0x2 -> id
+        0x3 -> id
+        0x4 -> id
+        0x5 -> id
+        0x6 -> id
+        0x7 -> id
+        0xE -> id
+        _   -> id
+  | opCode >= 0x9000 && opCode <= 0x9FFF  = id
+  | opCode >= 0xA000 && opCode <= 0xAFFF  = id
+  | opCode >= 0xB000 && opCode <= 0xBFFF  = id
+  | opCode >= 0xC000 && opCode <= 0xCFFF  = id
+  | opCode >= 0xD000 && opCode <= 0xDFFF  = id
   | opCode >= 0xE000 && opCode <= 0xEFFF  = 
       case opCode `mod` 0x100 of
-        0x9E -> chip
-        0xA1 -> chip
-        _    -> chip
+        0x9E -> id
+        0xA1 -> id
+        _    -> id
   | opCode >= 0xF000 && opCode <= 0xFFFF  =
       case opCode `mod` 0x100 of
-        0x07 -> chip
-        0x0A -> chip
-        0x15 -> chip
-        0x18 -> chip
-        0x1E -> chip
-        0x29 -> chip
-        0x33 -> chip
-        0x55 -> chip
-        0x65 -> chip
-        _    -> chip
-  | otherwise = chip
+        0x07 -> id
+        0x0A -> id
+        0x15 -> id
+        0x18 -> id
+        0x1E -> id
+        0x29 -> id
+        0x33 -> id
+        0x55 -> id
+        0x65 -> id
+        _    -> id
+  | otherwise = id
+
+clearDisplay :: ChipState -> ChipState
+clearDisplay chip = chip { gfx = V.replicate 8192 False }
+
+chipReturn :: ChipState -> ChipState
+chipReturn chip = chip { pc = accessStack (sp chip) chip, 
+  sp = sp chip - 1}
 
 keyboard :: V.Vector W.Word32  
 keyboard = V.fromList $ map toNumber [
@@ -174,3 +181,6 @@ fontSet = V.fromList
   ,0xF0, 0x80, 0xF0, 0x80, 0xF0 -- E
   ,0xF0, 0x80, 0xF0, 0x80, 0x80 -- F
   ]
+
+accessStack :: Integral a => a -> ChipState -> W.Word16
+accessStack index chip = stack chip V.! fromInteger (toInteger index)

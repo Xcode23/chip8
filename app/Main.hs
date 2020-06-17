@@ -50,7 +50,7 @@ mainLoop False chip accumulator renderer = do
 controlTimings :: W.Word32 -> IO W.Word32
 controlTimings previousTicks = do
   newTicks <- SDL.ticks
-  let maxIntendedDelay = ceiling ((1.0 / 60.0) * 1000.0)
+  let maxIntendedDelay = ceiling ((1.0 / 100.0) * 1000.0)
       tickDifference = newTicks - previousTicks
       condition = maxIntendedDelay - tickDifference < maxIntendedDelay && -- checks that tickDifference is positive
                     maxIntendedDelay - tickDifference > 0                 -- checks that ticks difference is smaller than maxIntendedDelay
