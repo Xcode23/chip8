@@ -7,7 +7,7 @@ import Data.Bits as B
 import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Storable.Mutable as VSM
 import qualified Data.Vector as V
-import Lib
+import Chip8
 import Control.Monad
 --import Numeric (showHex, showIntAtBase)
 --import Data.Char (intToDigit)

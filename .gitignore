@@ -1,4 +1,5 @@
 .stack-work/
 chip8.cabal
 .vscode
+.hlint.yaml
 *~
