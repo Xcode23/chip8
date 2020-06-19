@@ -26,6 +26,7 @@ dependencies:
 - text
 - bytestring
 - vector
+- random
 library:
   source-dirs: src
 

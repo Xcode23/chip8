@@ -27,7 +27,7 @@ main = --load "/home/bass/chip8/app/TETRIS" >>= print . V.length
   sound <- Mixer.load "/home/bass/chip8/app/sound.wav"
   play sound
   ticks <- SDL.ticks 
-  let chip = startChip ticks
+  chip <- startChip ticks
   mainLoop False chip 0 renderer
   closeAudio
   SDL.quit

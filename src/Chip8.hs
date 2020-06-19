@@ -15,39 +15,43 @@ import Control.Monad
 import SDL
 import SDL.Internal.Numbered
 import Utils
+import System.Random
 
 data ChipState = Chip {
                         registers :: V.Vector W.Word8, -- 16 registers
                         flagRegister :: Bool, -- VF
                         index :: W.Word16, 
                         delayTimer :: W.Word8,
-                        soundTimer :: W.Word32,
+                        soundTimer :: W.Word8,
                         timer :: W.Word32,
                         pc :: W.Word16,
                         sp :: W.Word8,
                         gfx :: V.Vector Bool, -- 128x64
                         keypad :: V.Vector Bool,  -- 16 keys
                         stack :: V.Vector W.Word16, -- 16 levels
-                        memory :: V.Vector W.Word8 -- 4096 bytes
+                        memory :: V.Vector W.Word8, -- 4096 bytes
+                        seed :: StdGen
                       } deriving (Show)
 
 tickDuration = ceiling (1.0 / 60.0 * 1000.0)
 
-startChip :: W.Word32 -> ChipState
-startChip startingTimer = 
-  Chip {
+startChip :: W.Word32 -> IO ChipState
+startChip startingTimer = do
+  random <- newStdGen 
+  return $ Chip {
         registers = V.replicate 15 0,
         flagRegister = False,
         index = 0, 
         delayTimer = 0,
-        soundTimer = 3600,
+        soundTimer = 0,
         timer = startingTimer,
         pc = 0x200,
         sp = 0,
         gfx = V.replicate 8192 False,
         keypad = V.replicate 16 False,
         stack = V.replicate 16 0,
-        memory = V.concat [fontSet, V.replicate (4096 - V.length fontSet) 0]
+        memory = V.concat [fontSet, V.replicate (4096 - V.length fontSet) 0],
+        seed = random
        }
 
 updateTimers :: ChipState -> IO ChipState
@@ -83,6 +87,14 @@ loadGame :: BS.ByteString -> ChipState -> ChipState
 loadGame game chip = chip { memory = newMemory }
   where newMemory = writeVectorToVector (memory chip) 0x200 (V.fromList $ BS.unpack game) 
 
+executeNextInstruction :: ChipState -> ChipState
+executeNextInstruction chip = 
+  let address = pc chip
+      incrementedChip = chip { pc = address + 2 }
+      byte1 = accessMemory chip address * 0x100
+      opCode = byte1 + accessMemory chip (address + 1)
+    in interpretOpCode opCode incrementedChip
+
 interpretOpCode :: W.Word16 -> ChipState -> ChipState
 interpretOpCode opCode
   | opCode == 0x00E0                      = clearDisplayOp
@@ -108,9 +120,9 @@ interpretOpCode opCode
         0xE -> leftShiftRegOp opCode
         _   -> id
   | opCode >= 0x9000 && opCode <= 0x9FFF  = skipNotEqualRegOp opCode
-  | opCode >= 0xA000 && opCode <= 0xAFFF  = id
-  | opCode >= 0xB000 && opCode <= 0xBFFF  = id
-  | opCode >= 0xC000 && opCode <= 0xCFFF  = id
+  | opCode >= 0xA000 && opCode <= 0xAFFF  = setIndexWithValueOp opCode
+  | opCode >= 0xB000 && opCode <= 0xBFFF  = jumpV0Op opCode
+  | opCode >= 0xC000 && opCode <= 0xCFFF  = randomAndOp opCode
   | opCode >= 0xD000 && opCode <= 0xDFFF  = id
   | opCode >= 0xE000 && opCode <= 0xEFFF  = 
       case opCode `mod` 0x100 of
@@ -153,7 +165,7 @@ callOp opCode chip =
 
 skipEqualValueOp :: W.Word16 -> ChipState -> ChipState
 skipEqualValueOp opCode chip =
-  let vx = readFromVector (registers chip) (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
+  let vx = accessRegister chip (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
       value = fromIntegral $ opCode `mod` 0x100
     in  chip {
           pc = if vx == value then pc chip + 2 else pc chip
@@ -161,7 +173,7 @@ skipEqualValueOp opCode chip =
 
 skipNotEqualValueOp :: W.Word16 -> ChipState -> ChipState
 skipNotEqualValueOp opCode chip =
-  let vx = readFromVector (registers chip) (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
+  let vx = accessRegister chip (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
       value = fromIntegral $ opCode `mod` 0x100
     in  chip {
           pc = if vx /= value then pc chip + 2 else pc chip
@@ -169,16 +181,16 @@ skipNotEqualValueOp opCode chip =
 
 skipEqualRegOp :: W.Word16 -> ChipState -> ChipState
 skipEqualRegOp opCode chip =
-  let vx = readFromVector (registers chip) (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
-      vy = readFromVector (registers chip) (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
+  let vx = accessRegister chip (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
+      vy = accessRegister chip (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
     in  chip {
           pc = if vx == vy then pc chip + 2 else pc chip
         }
 
 skipNotEqualRegOp :: W.Word16 -> ChipState -> ChipState
 skipNotEqualRegOp opCode chip =
-  let vx = readFromVector (registers chip) (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
-      vy = readFromVector (registers chip) (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
+  let vx = accessRegister chip (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
+      vy = accessRegister chip (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
     in  chip {
           pc = if vx /= vy then pc chip + 2 else pc chip
         }
@@ -193,7 +205,7 @@ loadValueOp opCode chip =
 loadRegOp :: W.Word16 -> ChipState -> ChipState
 loadRegOp opCode chip =
   let index = (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
-      vy = readFromVector (registers chip) (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
+      vy = accessRegister chip (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
       newRegisters = writeValueToVector (registers chip) index vy
     in chip { registers = newRegisters }
 
@@ -207,29 +219,29 @@ addValueOp opCode chip =
 orRegOp :: W.Word16 -> ChipState -> ChipState
 orRegOp opCode chip = 
   let index = (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
-      vy = readFromVector (registers chip) (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
+      vy = accessRegister chip (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
       newRegisters = modifyValueInVector (registers chip) (.|. vy) index
     in chip { registers = newRegisters }
 
 andRegOp :: W.Word16 -> ChipState -> ChipState
 andRegOp opCode chip = 
   let index = (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
-      vy = readFromVector (registers chip) (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
+      vy = accessRegister chip (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
       newRegisters = modifyValueInVector (registers chip) (.&. vy) index
     in chip { registers = newRegisters }
 
 xorRegOp :: W.Word16 -> ChipState -> ChipState
 xorRegOp opCode chip = 
   let index = (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
-      vy = readFromVector (registers chip) (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
+      vy = accessRegister chip (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
       newRegisters = modifyValueInVector (registers chip) (xor vy) index
     in chip { registers = newRegisters }
 
 addRegOp :: W.Word16 -> ChipState -> ChipState
 addRegOp opCode chip = 
   let index = (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
-      vx = readFromVector (registers chip) index
-      vy = readFromVector (registers chip) (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
+      vx = accessRegister chip index
+      vy = accessRegister chip (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
       newRegisters = writeValueToVector (registers chip) index (vx + vy)
     in  chip { 
           registers = newRegisters,
@@ -239,8 +251,8 @@ addRegOp opCode chip =
 subRegOp :: W.Word16 -> ChipState -> ChipState
 subRegOp opCode chip = 
   let index = (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
-      vx = readFromVector (registers chip) index
-      vy = readFromVector (registers chip) (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
+      vx = accessRegister chip index
+      vy = accessRegister chip (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
       newRegisters = writeValueToVector (registers chip) index (vx - vy)
     in  chip { 
           registers = newRegisters,
@@ -250,7 +262,7 @@ subRegOp opCode chip =
 rightShiftRegOp :: W.Word16 -> ChipState -> ChipState
 rightShiftRegOp opCode chip = 
   let index = (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
-      vx = readFromVector (registers chip) index
+      vx = accessRegister chip index
       newRegisters = writeValueToVector (registers chip) index (shiftR vx 1)
     in  chip { 
           registers = newRegisters,
@@ -260,7 +272,7 @@ rightShiftRegOp opCode chip =
 leftShiftRegOp :: W.Word16 -> ChipState -> ChipState
 leftShiftRegOp opCode chip = 
   let index = (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
-      vx = readFromVector (registers chip) index
+      vx = accessRegister chip index
       newRegisters = writeValueToVector (registers chip) index (shiftL vx 1)
     in  chip { 
           registers = newRegisters,
@@ -270,13 +282,38 @@ leftShiftRegOp opCode chip =
 subnRegOp :: W.Word16 -> ChipState -> ChipState
 subnRegOp opCode chip = 
   let index = (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
-      vx = readFromVector (registers chip) index
-      vy = readFromVector (registers chip) (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
+      vx = accessRegister chip index
+      vy = accessRegister chip (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
       newRegisters = writeValueToVector (registers chip) index (vy - vx)
     in  chip { 
           registers = newRegisters,
           flagRegister = vy > vx
         }
+
+setIndexWithValueOp :: W.Word16 -> ChipState -> ChipState
+setIndexWithValueOp opCode chip =
+  let value = opCode `mod` 0x1000
+    in chip { index = value }
+
+jumpV0Op :: W.Word16 -> ChipState -> ChipState
+jumpV0Op opCode chip =
+  let value = opCode `mod` 0x1000
+      v0 = fromIntegral $ accessRegister chip 0
+    in chip { pc = value + v0 }
+
+randomAndOp :: W.Word16 -> ChipState -> ChipState
+randomAndOp opCode chip =
+  let index = (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
+      value = fromIntegral $ opCode `mod` 0x100
+      (rand, newStdGen) = random $ seed chip :: (W.Word8, StdGen)
+      newRegisters = writeValueToVector (registers chip) index (rand .&. value)
+    in chip { registers = newRegisters, seed = newStdGen }
+
+accessRegister :: Integral a => ChipState -> a -> W.Word8
+accessRegister chip= readFromVector (registers chip)
+
+accessMemory :: Integral a => ChipState -> a -> W.Word16
+accessMemory chip index = fromIntegral $ readFromVector (memory chip) index
 
 keyboard :: V.Vector W.Word32  
 keyboard = V.fromList $ map toNumber [
