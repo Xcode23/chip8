@@ -26,9 +26,9 @@ main = --load "/home/bass/chip8/app/TETRIS" >>= print . V.length
   prepareAudio
   sound <- Mixer.load "/home/bass/chip8/app/sound.wav"
   play sound
-  ticks <- SDL.ticks 
-  chip <- startChip ticks
-  mainLoop False chip 0 renderer
+  chip <- startChip
+  let chipWithGame = loadGame testScreenGame chip
+  mainLoop False chipWithGame 0 renderer
   closeAudio
   SDL.quit
 
@@ -39,10 +39,11 @@ mainLoop False chip accumulator renderer = do
   pumpEvents
   keyState <- getKeyboardState
   newTicks <- controlTimings (timer chip)
-  updatedChip <- updateTimers chip 
-  screenData <- if keyState ScancodeA
-    then test
-    else test2
+  updatedChip <- run chip 
+  screenData <- convertToScreenData $ getScreen updatedChip
+  -- screenData <- if keyState ScancodeA
+  --   then test
+  --   else test2
   updateScreen screenData renderer
   --printFps accumulator
   mainLoop (keyState ScancodeEscape) updatedChip (accumulator+1) renderer
@@ -98,3 +99,9 @@ test = VS.thaw $ VS.fromList [255,255,255,255,0,0,0,0,255,255,255,255,0,0,0,0,0,
 
 test2 :: IO (VSM.IOVector W.Word8)
 test2 = VS.thaw $ VS.fromList [0,0,0,0,255,255,255,255,0,0,0,0,255,255,255,255,255,255,255,255,0,0,0,0,255,255,255,255,0,0,0,0,0,0,0,0,255,255,255,255,0,0,0,0,255,255,255,255,255,255,255,255,0,0,0,0,255,255,255,255,0,0,0,0]
+
+convertToScreenData :: [W.Word8] -> IO (VSM.IOVector W.Word8)
+convertToScreenData screen = VS.thaw $ VS.fromList screen
+
+testScreenGame :: BS.ByteString
+testScreenGame = BS.pack [0xA0, 0x00, 0x60, 0x03, 0x61, 0x03, 0xD0, 0x15, 0x12, 0x08]
