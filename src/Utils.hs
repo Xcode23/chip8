@@ -29,3 +29,15 @@ modifyValueInVector func index vector = runST $ do
   mutableVector <- V.thaw vector
   VM.modify mutableVector func $ fromIntegral index
   V.freeze mutableVector
+
+modifyListInVector :: (V.Unbox a, Integral b) => (a -> a -> a) -> [(b,a)] -> V.Vector a -> V.Vector a
+modifyListInVector func list vector = runST $ do
+  mutableVector <- V.thaw vector
+  auxModifyListInVector func list mutableVector
+  V.freeze mutableVector
+
+auxModifyListInVector :: (V.Unbox a, Integral b) => (a -> a -> a) -> [(b,a)] -> VM.MVector s a -> ST s ()
+auxModifyListInVector _ [] _ = return ()
+auxModifyListInVector func ((index, value) : next) vector = do
+  VM.modify vector (func value) $ fromIntegral index
+  auxModifyListInVector func next vector

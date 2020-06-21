@@ -9,6 +9,7 @@ import qualified Data.Vector.Storable.Mutable as VSM
 import qualified Data.Vector as V
 import Chip8
 import Control.Monad
+import qualified Data.Vector.Unboxed as VB
 --import Numeric (showHex, showIntAtBase)
 --import Data.Char (intToDigit)
 
@@ -39,7 +40,7 @@ mainLoop False chip accumulator renderer = do
   pumpEvents
   keyState <- getKeyboardState
   newTicks <- controlTimings (timer chip)
-  updatedChip <- run chip 
+  updatedChip <- run chip
   screenData <- convertToScreenData $ getScreen updatedChip
   -- screenData <- if keyState ScancodeA
   --   then test
@@ -60,7 +61,7 @@ controlTimings previousTicks = do
 
 updateScreen :: VSM.IOVector W.Word8 -> Renderer -> IO ()
 updateScreen screenData renderer = do
-  surface <- createRGBSurfaceFrom screenData (V2 4 4) 16 RGBA8888
+  surface <- createRGBSurfaceFrom screenData (V2 128 64) 512 RGBA8888 -- (V2 width height) width * 4
   texture <- createTextureFromSurface renderer surface
   clear renderer
   copy renderer texture Nothing Nothing
@@ -104,4 +105,4 @@ convertToScreenData :: [W.Word8] -> IO (VSM.IOVector W.Word8)
 convertToScreenData screen = VS.thaw $ VS.fromList screen
 
 testScreenGame :: BS.ByteString
-testScreenGame = BS.pack [0xA0, 0x00, 0x60, 0x03, 0x61, 0x03, 0xD0, 0x15, 0x12, 0x08]
+testScreenGame = BS.pack [0xA0, 55, 0x60, 0x40, 0x61, 0x20, 0xD0, 0x15, 0xA0, 0, 0xD0, 0x15, 0x12, 0x0C]

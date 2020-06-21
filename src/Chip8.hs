@@ -2,7 +2,6 @@ module Chip8
           (
             ChipState(..),
             startChip,
-            updateTimers,
             getScreen,
             loadGame,
             run
@@ -19,10 +18,10 @@ import SDL
 import SDL.Internal.Numbered
 import Utils
 import System.Random
+--import Debug.Trace --traceShowId
 
 data ChipState = Chip {
                         registers :: V.Vector W.Word8, -- 16 registers
-                        flagRegister :: Bool, -- VF
                         index :: W.Word16, 
                         delayTimer :: W.Word8,
                         soundTimer :: W.Word8,
@@ -36,13 +35,30 @@ data ChipState = Chip {
                         seed :: StdGen
                       } deriving (Show)
 
+instance Eq ChipState where
+  (==) chip1 chip2 =
+    equals registers 
+    && equals index 
+    && equals delayTimer
+    && equals soundTimer
+    && equals timer
+    && equals pc
+    && equals sp
+    && equals gfx
+    && equals keypad
+    && equals stack
+    && equals memory
+      where equals func = func chip1 == func chip2
+
 tickDuration = ceiling (1.0 / 60.0 * 1000.0)
 screenSize = 8192
 memorySize = 4096
-registersSize = 15
+registersSize = 16
 keypadSize = 16
 stackSize = 16
 gameStartAddress = 0x200
+spriteWidth = 8
+screenWidth = 128
 
 keyboard :: V.Vector W.Word32  
 keyboard = V.fromList $ map toNumber [
@@ -90,7 +106,6 @@ startChip = do
   startingTimer <- SDL.ticks 
   return $ Chip {
         registers = V.replicate registersSize 0,
-        flagRegister = False,
         index = 0, 
         delayTimer = 0,
         soundTimer = 0,
@@ -107,12 +122,16 @@ startChip = do
 run :: ChipState -> IO ChipState
 run chip = do
   let newChip = executeNextInstruction chip
-  updateTimers newChip
-
+  -- if previously run instruction was wait for key then newChip == key and timers should not be updated
+  let updatedTimersChipIO = if chip /= newChip then updateTimers newChip else return newChip
+  updatedTimersChip <- updatedTimersChipIO
+  pumpEvents
+  keyState <- getKeyboardState
+  return $ updateKeypad keyState updatedTimersChip
+   
 updateTimers :: ChipState -> IO ChipState
 updateTimers chip = do
     newTime <- SDL.ticks
-    when (soundTimer chip == 0) (print $ fromIntegral newTime / 1000.0)
     let oldTime = timer chip
         shouldUpdate = newTime > oldTime && newTime - tickDuration >= oldTime
       in  if shouldUpdate 
@@ -153,7 +172,7 @@ interpretOpCode :: W.Word16 -> ChipState -> ChipState
 interpretOpCode opCode
   | opCode == 0x00E0                      = clearDisplayOp
   | opCode == 0x00EE                      = returnOp
-  | opCode >= 0x0000 && opCode <= 0x0FFF  = id --noOp
+  | opCode >= 0x0000 && opCode <= 0x0FFF  = noOp
   | opCode >= 0x1000 && opCode <= 0x1FFF  = jumpOp opCode
   | opCode >= 0x2000 && opCode <= 0x2FFF  = callOp opCode
   | opCode >= 0x3000 && opCode <= 0x3FFF  = skipEqualValueOp opCode
@@ -172,21 +191,21 @@ interpretOpCode opCode
         0x6 -> rightShiftRegOp opCode
         0x7 -> subnRegOp opCode
         0xE -> leftShiftRegOp opCode
-        _   -> id
+        _   -> noOp
   | opCode >= 0x9000 && opCode <= 0x9FFF  = skipNotEqualRegOp opCode
   | opCode >= 0xA000 && opCode <= 0xAFFF  = setIndexWithValueOp opCode
   | opCode >= 0xB000 && opCode <= 0xBFFF  = jumpV0Op opCode
   | opCode >= 0xC000 && opCode <= 0xCFFF  = randomAndOp opCode
-  | opCode >= 0xD000 && opCode <= 0xDFFF  = id
+  | opCode >= 0xD000 && opCode <= 0xDFFF  = drawOp opCode
   | opCode >= 0xE000 && opCode <= 0xEFFF  = 
       case opCode `mod` 0x100 of
-        0x9E -> id
-        0xA1 -> id
-        _    -> id
+        0x9E -> skipEqualKeyOp opCode
+        0xA1 -> skipNotEqualKeyOp opCode
+        _    -> noOp
   | opCode >= 0xF000 && opCode <= 0xFFFF  =
       case opCode `mod` 0x100 of
         0x07 -> id
-        0x0A -> id
+        0x0A -> waitForKeyOp opCode
         0x15 -> id
         0x18 -> id
         0x1E -> id
@@ -194,8 +213,11 @@ interpretOpCode opCode
         0x33 -> id
         0x55 -> id
         0x65 -> id
-        _    -> id
-  | otherwise = id
+        _    -> noOp
+  | otherwise = noOp
+
+noOp :: ChipState -> ChipState
+noOp chip = chip { pc = pc chip + 2 }
 
 clearDisplayOp :: ChipState -> ChipState
 clearDisplayOp chip = chip { gfx = V.replicate screenSize False, pc = pc chip + 2 }
@@ -301,9 +323,10 @@ addRegOp opCode chip =
       vx = accessRegister chip index
       vy = accessRegister chip (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
       newRegisters = writeValueToVector index (vx + vy) $ registers chip
+      vf = if vx > (255 - vy) then 1 else 0
+      newRegistersWithVf = writeValueToVector 0xF vf newRegisters
     in  chip { 
-          registers = newRegisters,
-          flagRegister = vx > (255 - vy),
+          registers = newRegistersWithVf,
           pc = pc chip + 2
         }
 
@@ -313,9 +336,10 @@ subRegOp opCode chip =
       vx = accessRegister chip index
       vy = accessRegister chip (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
       newRegisters = writeValueToVector index (vx - vy) $ registers chip
+      vf = if vx > vy then 1 else 0
+      newRegistersWithVf = writeValueToVector 0xF vf newRegisters
     in  chip { 
-          registers = newRegisters,
-          flagRegister = vx > vy,
+          registers = newRegistersWithVf,
           pc = pc chip + 2
         }
 
@@ -324,9 +348,10 @@ rightShiftRegOp opCode chip =
   let index = (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
       vx = accessRegister chip index
       newRegisters = writeValueToVector index (shiftR vx 1) $ registers chip
+      vf = if (vx `mod` 2) == 1 then 1 else 0
+      newRegistersWithVf = writeValueToVector 0xF vf newRegisters
     in  chip { 
-          registers = newRegisters,
-          flagRegister = (vx `mod` 2) == 1,
+          registers = newRegistersWithVf,
           pc = pc chip + 2
         }
 
@@ -334,10 +359,11 @@ leftShiftRegOp :: W.Word16 -> ChipState -> ChipState
 leftShiftRegOp opCode chip = 
   let index = (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
       vx = accessRegister chip index
-      newRegisters = writeValueToVector index (shiftL vx 1) $ registers chip 
+      newRegisters = writeValueToVector index (shiftL vx 1) $ registers chip
+      vf = if vx >= 128 then 1 else 0
+      newRegistersWithVf = writeValueToVector 0xF vf newRegisters 
     in  chip { 
-          registers = newRegisters,
-          flagRegister = vx >= 128,
+          registers = newRegistersWithVf,
           pc = pc chip + 2
         }
 
@@ -347,9 +373,10 @@ subnRegOp opCode chip =
       vx = accessRegister chip index
       vy = accessRegister chip (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
       newRegisters = writeValueToVector index (vy - vx) $ registers chip
+      vf = if vy > vx then 1 else 0
+      newRegistersWithVf = writeValueToVector 0xF vf newRegisters
     in  chip { 
-          registers = newRegisters,
-          flagRegister = vy > vx,
+          registers = newRegistersWithVf,
           pc = pc chip + 2
         }
 
@@ -383,14 +410,60 @@ waitForKeyOp opCode chip =
       where index = opCode `div` 0x100 `mod` 0x10 -- second opCode hex digit
             wordKey = fromIntegral key
 
--- drawOp :: W.Word16 -> ChipState -> ChipState
--- drawOp opCode chip = chip { gfx = newScreen, pc = pc chip + 2 }
---   where newScreen = 
+skipEqualKeyOp :: W.Word16 -> ChipState -> ChipState
+skipEqualKeyOp opCode chip =
+  let vx = accessRegister chip (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
+    in chip {
+          pc = if accessKeypad chip vx then pc chip + 4 else pc chip + 2
+        }
 
--- getSprite :: ChipState -> W.Word16 -> Int -> [(W.Word16, Bool)]
--- getSprite chip index size =
---   let vectorSprite = readVectorFromVector (register)
---     in []
+skipNotEqualKeyOp :: W.Word16 -> ChipState -> ChipState
+skipNotEqualKeyOp opCode chip =
+  let vx = accessRegister chip (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
+    in chip {
+          pc = if not (accessKeypad chip vx) then pc chip + 4 else pc chip + 2
+        }
+
+drawOp :: W.Word16 -> ChipState -> ChipState
+drawOp opCode chip = 
+  chip { 
+    gfx = newScreen,
+    registers = newRegisters,
+    pc = pc chip + 2 
+  }
+  where newScreen = modifyListInVector xor sprite $ gfx chip
+        newRegisters = writeValueToVector 0xF vf $ registers chip
+        vf = if checkCollision chip sprite then 1 else 0
+        sprite = getSprite chip (index chip) size position
+        size = fromIntegral $ opCode `mod` 0x10 -- fourth opCode hex digit
+        position = (vx, vy)
+        vx = fromIntegral $ accessRegister chip (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
+        vy = fromIntegral $ accessRegister chip (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
+
+checkCollision :: ChipState -> [(Int, Bool)] -> Bool
+checkCollision _ [] = False
+checkCollision chip ((index, value) : next) = (value && currentScreenValue) || checkCollision chip next
+  where currentScreenValue = readFromVector index $ gfx chip
+
+getSprite :: ChipState -> W.Word16 -> Int -> (Int, Int) -> [(Int, Bool)]
+getSprite chip index size (xPosition, yPosition) =
+  let sprite = V.toList . readVectorFromVector index size $ memory chip
+      boolSprite = concatMap convertToBits sprite
+      auxIndexCalculatorFunc x = x `mod` spriteWidth + x `div` spriteWidth * screenWidth
+      position = xPosition + yPosition * screenWidth
+      indexList = map auxIndexCalculatorFunc [0..(length boolSprite - 1)]
+      addedPositionIndexList = map (auxAddPosition position) indexList
+    in zip addedPositionIndexList boolSprite
+
+auxAddPosition :: Int -> Int -> Int
+auxAddPosition position index = coordinatesAdjustedIndex
+  where coordinatesAdjustedIndex = if xCoordinateAdjustedIndex `div` screenSize > 0
+                              then xCoordinateAdjustedIndex `mod` screenSize
+                              else xCoordinateAdjustedIndex
+        xCoordinateAdjustedIndex = if index `div` screenWidth < newIndex `div` screenWidth
+                              then newIndex - screenWidth
+                              else newIndex
+        newIndex = index + position
 
 accessRegister :: Integral a => ChipState -> a -> W.Word8
 accessRegister chip index = readFromVector index $ registers chip
@@ -400,6 +473,9 @@ accessMemory chip index = fromIntegral . readFromVector index $ memory chip
 
 accessStack :: Integral a => ChipState -> a -> W.Word16
 accessStack chip index = readFromVector index $ stack chip
+
+accessKeypad :: Integral a => ChipState -> a -> Bool
+accessKeypad chip index = readFromVector index $ keypad chip
 
 getScreen :: ChipState -> [W.Word8]
 getScreen chip = concatMap (\x -> if x then replicate 4 255 else replicate 4 0) $ V.toList (gfx chip)
