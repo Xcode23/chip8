@@ -204,15 +204,15 @@ interpretOpCode opCode
         _    -> noOp
   | opCode >= 0xF000 && opCode <= 0xFFFF  =
       case opCode `mod` 0x100 of
-        0x07 -> id
+        0x07 -> setRegWithDelayOp opCode
         0x0A -> waitForKeyOp opCode
-        0x15 -> id
-        0x18 -> id
-        0x1E -> id
-        0x29 -> id
-        0x33 -> id
-        0x55 -> id
-        0x65 -> id
+        0x15 -> setDelayWithRegOp opCode
+        0x18 -> setSoundWithRegOp opCode
+        0x1E -> addRegToIndexOp opCode
+        0x29 -> setIndexToFontOp opCode
+        0x33 -> storeDecimalRegOp opCode
+        0x55 -> storeRegsOp opCode
+        0x65 -> loadRegsFromMemoryOp opCode
         _    -> noOp
   | otherwise = noOp
 
@@ -404,10 +404,11 @@ waitForKeyOp opCode chip =
   case V.elemIndex True (keypad chip) of
     Nothing  -> chip
     Just key -> chip { 
-                  registers = writeValueToVector index wordKey $ registers chip, 
+                  registers = newRegisters, 
                   pc = pc chip + 2 
                 }
-      where index = opCode `div` 0x100 `mod` 0x10 -- second opCode hex digit
+      where newRegisters = writeValueToVector index wordKey $ registers chip
+            index = opCode `div` 0x100 `mod` 0x10 -- second opCode hex digit
             wordKey = fromIntegral key
 
 skipEqualKeyOp :: W.Word16 -> ChipState -> ChipState
@@ -423,6 +424,78 @@ skipNotEqualKeyOp opCode chip =
     in chip {
           pc = if not (accessKeypad chip vx) then pc chip + 4 else pc chip + 2
         }
+
+setRegWithDelayOp :: W.Word16 -> ChipState -> ChipState
+setRegWithDelayOp opCode chip =
+  let index = (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
+      newRegisters = writeValueToVector index (delayTimer chip) $ registers chip
+    in  chip {
+          registers = newRegisters,
+          pc = pc chip + 2
+        }
+
+setDelayWithRegOp :: W.Word16 -> ChipState -> ChipState
+setDelayWithRegOp opCode chip =
+  let index = (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
+    in  chip {
+          delayTimer = accessRegister chip index,
+          pc = pc chip + 2
+        }
+
+setSoundWithRegOp :: W.Word16 -> ChipState -> ChipState
+setSoundWithRegOp opCode chip =
+  let index = (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
+    in  chip {
+          soundTimer = accessRegister chip index,
+          pc = pc chip + 2
+        }
+
+addRegToIndexOp :: W.Word16 -> ChipState -> ChipState
+addRegToIndexOp opCode chip =
+  let vx = accessRegister chip (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
+    in  chip {
+          index = index chip + fromIntegral vx,
+          pc = pc chip + 2
+        }
+
+setIndexToFontOp :: W.Word16 -> ChipState -> ChipState
+setIndexToFontOp opCode chip =
+  let vx = fromIntegral $ accessRegister chip (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
+    in  chip {
+          index = vx * 5, -- vx contains a hex digit whose font sprite is at the address hexdigit * 5
+          pc = pc chip + 2
+        }
+
+storeDecimalRegOp :: W.Word16 -> ChipState -> ChipState
+storeDecimalRegOp opCode chip =
+  let vx = accessRegister chip (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
+      newValues = V.fromList [vx `div` 100, (vx `div` 10) `mod` 10, vx `mod` 10]
+      newMemory = writeVectorToVector (index chip) newValues $ memory chip
+    in  chip {
+          memory = newMemory,
+          pc = pc chip + 2
+        }
+
+storeRegsOp :: W.Word16 -> ChipState -> ChipState
+storeRegsOp opCode chip =
+  let maxIndex = (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
+      newValues = readVectorFromVector 0 (maxIndex + 1) $ registers chip -- get registers up to and including maxIndex
+      newMemory = writeVectorToVector (index chip) newValues $ memory chip
+    in  chip {
+          memory = newMemory,
+          pc = pc chip + 2
+        }
+
+loadRegsFromMemoryOp :: W.Word16 -> ChipState -> ChipState
+loadRegsFromMemoryOp opCode chip =
+  let maxIndex = (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
+      newValues = readVectorFromVector (index chip) (maxIndex + 1) $ memory chip -- get register values from memory
+      newRegisters = writeVectorToVector 0 newValues $ registers chip
+    in  chip {
+          registers = newRegisters,
+          pc = pc chip + 2
+        }
+
 
 drawOp :: W.Word16 -> ChipState -> ChipState
 drawOp opCode chip = 
