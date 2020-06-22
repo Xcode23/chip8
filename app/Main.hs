@@ -28,7 +28,8 @@ main = --load "/home/bass/chip8/app/TETRIS" >>= print . V.length
   sound <- Mixer.load "/home/bass/chip8/app/sound.wav"
   play sound
   chip <- startChip
-  let chipWithGame = loadGame testScreenGame chip
+  rom <- loadGameFile "/home/bass/chip8/app/SPACE_INVADERS"
+  let chipWithGame = loadGame rom chip
   mainLoop False chipWithGame 0 renderer
   closeAudio
   SDL.quit
@@ -39,25 +40,24 @@ mainLoop False chip accumulator renderer = do
   SDL.delay 1 -- slight delay to help controlTimings keep up
   pumpEvents
   keyState <- getKeyboardState
-  newTicks <- controlTimings (timer chip)
+  controlTimings (timer chip)
   updatedChip <- run chip
+  --printFps accumulator
   screenData <- convertToScreenData $ getScreen updatedChip
   -- screenData <- if keyState ScancodeA
   --   then test
   --   else test2
   updateScreen screenData renderer
-  --printFps accumulator
   mainLoop (keyState ScancodeEscape) updatedChip (accumulator+1) renderer
 
-controlTimings :: W.Word32 -> IO W.Word32
+controlTimings :: W.Word32 -> IO ()
 controlTimings previousTicks = do
   newTicks <- SDL.ticks
   let maxIntendedDelay = ceiling ((1.0 / 100.0) * 1000.0)
       tickDifference = newTicks - previousTicks
       condition = maxIntendedDelay - tickDifference < maxIntendedDelay && -- checks that tickDifference is positive
                     maxIntendedDelay - tickDifference > 0                 -- checks that ticks difference is smaller than maxIntendedDelay
-  when condition $ SDL.delay (maxIntendedDelay - tickDifference)
-  SDL.ticks
+  when condition $ SDL.delay maxIntendedDelay
 
 updateScreen :: VSM.IOVector W.Word8 -> Renderer -> IO ()
 updateScreen screenData renderer = do
@@ -86,10 +86,6 @@ prepareRenderer :: IO Renderer
 prepareRenderer = do
   window <- createWindow (T.pack "Chip-8") defaultWindow 
   createRenderer window (-1) defaultRenderer
-
-toWord16 :: W.Word8 -> W.Word8 -> W.Word16
-toWord16 x y = fromInteger $ shiftL (fromIntegral x) 8 .|. fromIntegral y
---print $ showHex (0x8154 `mod` 0x0100) ""
 
 loadGameFile :: String -> IO BS.ByteString
 loadGameFile = BS.readFile

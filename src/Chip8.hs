@@ -18,7 +18,7 @@ import SDL
 import SDL.Internal.Numbered
 import Utils
 import System.Random
---import Debug.Trace --traceShowId
+import Debug.Trace --traceShowId
 
 data ChipState = Chip {
                         registers :: V.Vector W.Word8, -- 16 registers
@@ -57,7 +57,7 @@ registersSize = 16
 keypadSize = 16
 stackSize = 16
 gameStartAddress = 0x200
-spriteWidth = 8
+spriteWidth = 16
 screenWidth = 128
 
 keyboard :: V.Vector W.Word32  
@@ -509,7 +509,8 @@ drawOp opCode chip =
         vf = if checkCollision chip sprite then 1 else 0
         sprite = getSprite chip (index chip) size position
         size = fromIntegral $ opCode `mod` 0x10 -- fourth opCode hex digit
-        position = (vx, vy)
+        position = (2 * vx, 2 * vy) -- stretch coordinates to super-chip8 128x64 instead of original 64*32 resolution
+        test = if vx > 60 then traceShowId vx else vx
         vx = fromIntegral $ accessRegister chip (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
         vy = fromIntegral $ accessRegister chip (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
 
@@ -521,12 +522,21 @@ checkCollision chip ((index, value) : next) = (value && currentScreenValue) || c
 getSprite :: ChipState -> W.Word16 -> Int -> (Int, Int) -> [(Int, Bool)]
 getSprite chip index size (xPosition, yPosition) =
   let sprite = V.toList . readVectorFromVector index size $ memory chip
-      boolSprite = concatMap convertToBits sprite
+      smallBoolSprite = concatMap convertToBits sprite
+      boolSprite = stretchSprite smallBoolSprite -- stretch sprite to super-chip8 128x64 instead of original 64*32 resolution
       auxIndexCalculatorFunc x = x `mod` spriteWidth + x `div` spriteWidth * screenWidth
       position = xPosition + yPosition * screenWidth
       indexList = map auxIndexCalculatorFunc [0..(length boolSprite - 1)]
       addedPositionIndexList = map (auxAddPosition position) indexList
     in zip addedPositionIndexList boolSprite
+
+stretchSprite :: [Bool] -> [Bool]
+stretchSprite sprite = concat $ concatMap (doubleLines 1) heightStretchedSprite
+  where heightStretchedSprite = doubleLines 8 sprite
+
+doubleLines :: Int -> [a] -> [[a]]
+doubleLines _ [] = []
+doubleLines size list = take size list : take size list : doubleLines size (drop size list)
 
 auxAddPosition :: Int -> Int -> Int
 auxAddPosition position index = coordinatesAdjustedIndex
@@ -556,5 +566,6 @@ getScreen chip = concatMap (\x -> if x then replicate 4 255 else replicate 4 0) 
 convertToBits :: W.Word8 -> [Bool]
 convertToBits x = map (testBit x) [7,6..0]
 
-boolTest :: V.Vector Bool
-boolTest = V.fromList [True,False,True,False,False,True,False,True,True,False,True,False,False,True,False,True]
+boolTest :: [Bool]
+boolTest = [True,False,True,False,False,True,False,True,True,False,True,False,False,True,False,True]
+

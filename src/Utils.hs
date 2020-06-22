@@ -6,17 +6,17 @@ import Control.Monad.ST
 
 writeVectorToVector :: (V.Unbox a, Integral b) => b -> V.Vector a -> V.Vector a-> V.Vector a
 writeVectorToVector start newValues vector = runST $ do
-  mutableValues <- V.thaw newValues
-  mutableVector <- V.thaw vector
+  mutableValues <- V.unsafeThaw newValues
+  mutableVector <- V.unsafeThaw vector
   let mutableSlice = VM.slice (fromIntegral start) (VM.length mutableValues) mutableVector
-  VM.copy mutableSlice mutableValues
-  V.freeze mutableVector
+  VM.unsafeCopy mutableSlice mutableValues
+  V.unsafeFreeze mutableVector
 
 writeValueToVector :: (V.Unbox a, Integral b) => b -> a -> V.Vector a -> V.Vector a
 writeValueToVector index value vector = runST $ do
-  mutableVector <- V.thaw vector
+  mutableVector <- V.unsafeThaw vector
   VM.write mutableVector (fromIntegral index) value
-  V.freeze mutableVector
+  V.unsafeFreeze mutableVector
 
 readFromVector :: (V.Unbox a, Integral b) => b -> V.Vector a -> a
 readFromVector index vector = vector V.! fromIntegral index
@@ -26,18 +26,18 @@ readVectorFromVector index size = V.slice (fromIntegral index) $ fromIntegral si
 
 modifyValueInVector :: (V.Unbox a, Integral b) => (a -> a) -> b -> V.Vector a -> V.Vector a
 modifyValueInVector func index vector = runST $ do
-  mutableVector <- V.thaw vector
-  VM.modify mutableVector func $ fromIntegral index
-  V.freeze mutableVector
+  mutableVector <- V.unsafeThaw vector
+  VM.unsafeModify mutableVector func $ fromIntegral index
+  V.unsafeFreeze mutableVector
 
-modifyListInVector :: (V.Unbox a, Integral b) => (a -> a -> a) -> [(b,a)] -> V.Vector a -> V.Vector a
+modifyListInVector :: V.Unbox a => (a -> a -> a) -> [(Int,a)] -> V.Vector a -> V.Vector a
 modifyListInVector func list vector = runST $ do
-  mutableVector <- V.thaw vector
+  mutableVector <- V.unsafeThaw vector
   auxModifyListInVector func list mutableVector
-  V.freeze mutableVector
+  V.unsafeFreeze mutableVector
 
-auxModifyListInVector :: (V.Unbox a, Integral b) => (a -> a -> a) -> [(b,a)] -> VM.MVector s a -> ST s ()
+auxModifyListInVector :: V.Unbox a => (a -> a -> a) -> [(Int,a)] -> VM.MVector s a -> ST s ()
 auxModifyListInVector _ [] _ = return ()
 auxModifyListInVector func ((index, value) : next) vector = do
-  VM.modify vector (func value) $ fromIntegral index
+  VM.unsafeModify vector (func value) $ fromIntegral index
   auxModifyListInVector func next vector
