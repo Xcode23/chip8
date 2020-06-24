@@ -220,7 +220,7 @@ noOp :: ChipState -> ChipState
 noOp chip = chip { pc = pc chip + 2 }
 
 clearDisplayOp :: ChipState -> ChipState
-clearDisplayOp chip = chip { gfx = V.replicate screenSize False, pc = pc chip + 2 }
+clearDisplayOp chip = chip { gfx = V.fromList $ replicate screenSize False, pc = pc chip + 2 }
 
 returnOp :: ChipState -> ChipState
 returnOp chip = 
