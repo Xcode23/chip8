@@ -1,22 +1,16 @@
 import SDL
-import SDL.Mixer as Mixer
+--import SDL.Mixer as Mixer
 import qualified Data.Text as T
 import qualified Data.ByteString as BS
 import qualified Data.Word as W
 import Data.Bits as B
 import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Storable.Mutable as VSM
-import qualified Data.Vector as V
 import Chip8
 import Control.Monad
-import qualified Data.Vector.Unboxed as VB
+import System.Environment
 --import Numeric (showHex, showIntAtBase)
 --import Data.Char (intToDigit)
-
-
-
-
-
 
 
 main :: IO ()
@@ -24,14 +18,16 @@ main = --load "/home/bass/chip8/app/TETRIS" >>= print . V.length
   do
   initializeAll
   renderer <- prepareRenderer
-  prepareAudio
-  sound <- Mixer.load "/home/bass/chip8/app/sound.wav"
-  play sound
+  --prepareAudio
+  --sound <- Mixer.load "/home/bass/chip8/app/sound.wav"
+  --play sound
   chip <- startChip
-  rom <- loadGameFile "/home/bass/chip8/app/SPACE_INVADERS"
+  args <- getArgs
+  let romName = head args 
+  rom <- loadGameFile $ "./" ++ romName
   let chipWithGame = loadGame rom chip
   mainLoop False chipWithGame 0 renderer
-  closeAudio
+  --closeAudio
   SDL.quit
 
 mainLoop :: Bool -> ChipState -> Int -> Renderer -> IO ()
@@ -44,9 +40,6 @@ mainLoop False chip accumulator renderer = do
   updatedChip <- run chip
   --printFps accumulator
   screenData <- convertToScreenData $ getScreen updatedChip
-  -- screenData <- if keyState ScancodeA
-  --   then test
-  --   else test2
   updateScreen screenData renderer
   mainLoop (keyState ScancodeEscape) updatedChip (accumulator+1) renderer
 
@@ -76,11 +69,11 @@ printFps frames = do
   --print frames
   print ("FPS:" ++ show fps)
 
-prepareAudio :: IO ()
-prepareAudio = do
-  let audio = Audio 44100 FormatU8 Mixer.Stereo
-  myAudio <- openAudio audio 2048
-  return ()
+-- prepareAudio :: IO ()
+-- prepareAudio = do
+--   let audio = Audio 44100 FormatU8 Mixer.Stereo
+--   myAudio <- openAudio audio 2048
+--   return ()
 
 prepareRenderer :: IO Renderer
 prepareRenderer = do

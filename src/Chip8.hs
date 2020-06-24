@@ -18,7 +18,7 @@ import SDL
 import SDL.Internal.Numbered
 import Utils
 import System.Random
-import Debug.Trace --traceShowId
+--import Debug.Trace --traceShowId
 
 data ChipState = Chip {
                         registers :: V.Vector W.Word8, -- 16 registers
@@ -510,7 +510,6 @@ drawOp opCode chip =
         sprite = getSprite chip (index chip) size position
         size = fromIntegral $ opCode `mod` 0x10 -- fourth opCode hex digit
         position = (2 * vx, 2 * vy) -- stretch coordinates to super-chip8 128x64 instead of original 64*32 resolution
-        test = if vx > 60 then traceShowId vx else vx
         vx = fromIntegral $ accessRegister chip (opCode `div` 0x100 `mod` 0x10) -- second opCode hex digit
         vy = fromIntegral $ accessRegister chip (opCode `div` 0x10 `mod` 0x10) -- third opCode hex digit
 
