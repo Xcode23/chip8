@@ -1,5 +1,5 @@
 import SDL
---import SDL.Mixer as Mixer
+import SDL.Mixer as Mixer
 import qualified Data.Text as T
 import qualified Data.ByteString as BS
 import qualified Data.Word as W
@@ -9,49 +9,33 @@ import qualified Data.Vector.Storable.Mutable as VSM
 import Chip8
 import Control.Monad
 import System.Environment
---import Numeric (showHex, showIntAtBase)
---import Data.Char (intToDigit)
 
 
 main :: IO ()
-main = --load "/home/bass/chip8/app/TETRIS" >>= print . V.length
-  do
+main = do
   initializeAll
   renderer <- prepareRenderer
-  --prepareAudio
-  --sound <- Mixer.load "/home/bass/chip8/app/sound.wav"
-  --play sound
+  prepareAudio
   chip <- startChip
   args <- getArgs
   let romName = head args 
   rom <- loadGameFile $ "./" ++ romName
   let chipWithGame = loadGame rom chip
-  mainLoop False chipWithGame 0 renderer
-  --closeAudio
+  mainLoop False chipWithGame renderer
+  closeAudio
   SDL.quit
 
-mainLoop :: Bool -> ChipState -> Int -> Renderer -> IO ()
-mainLoop True _ _ _ = return ()
-mainLoop False chip accumulator renderer = do
+mainLoop :: Bool -> ChipState -> Renderer -> IO ()
+mainLoop True _ _ = return ()
+mainLoop False chip renderer = do
   SDL.delay 1 -- slight delay to help controlTimings keep up
   pumpEvents
   keyState <- getKeyboardState
-  --controlTimings (timer chip)
   updatedChip <- run chip
-  --printFps accumulator
   let updateFlag = newScreen updatedChip
   let (screen, newChip) = getScreen updatedChip
   when updateFlag (convertToScreenData screen >>= updateScreen renderer)
-  mainLoop (keyState ScancodeEscape) newChip (accumulator+1) renderer
-
-controlTimings :: W.Word32 -> IO ()
-controlTimings previousTicks = do
-  newTicks <- SDL.ticks
-  let maxIntendedDelay = ceiling ((1.0 / 100.0) * 1000.0)
-      tickDifference = newTicks - previousTicks
-      condition = maxIntendedDelay - tickDifference < maxIntendedDelay && -- checks that tickDifference is positive
-                    maxIntendedDelay - tickDifference > 0                 -- checks that ticks difference is smaller than maxIntendedDelay
-  when condition $ SDL.delay maxIntendedDelay
+  mainLoop (keyState ScancodeEscape) newChip renderer
 
 updateScreen :: Renderer -> VSM.IOVector W.Word8 -> IO ()
 updateScreen renderer screenData = do
@@ -61,20 +45,11 @@ updateScreen renderer screenData = do
   copy renderer texture Nothing Nothing
   present renderer
 
-printFps :: Int -> IO ()
-printFps frames = do
-  testTicks <- SDL.ticks
-  let secs = fromIntegral testTicks / 1000.0 :: Float
-      fps = fromIntegral frames / secs :: Float
-  --print secs
-  --print frames
-  print ("FPS:" ++ show fps)
-
--- prepareAudio :: IO ()
--- prepareAudio = do
---   let audio = Audio 44100 FormatU8 Mixer.Stereo
---   myAudio <- openAudio audio 2048
---   return ()
+prepareAudio :: IO ()
+prepareAudio = do
+  let audio = Audio 44100 FormatU8 Mixer.Stereo
+  myAudio <- openAudio audio 2048
+  return ()
 
 prepareRenderer :: IO Renderer
 prepareRenderer = do
@@ -84,15 +59,5 @@ prepareRenderer = do
 loadGameFile :: String -> IO BS.ByteString
 loadGameFile = BS.readFile
 
---dummy surfaces for testing
-test :: IO (VSM.IOVector W.Word8)
-test = VS.thaw $ VS.fromList [255,255,255,255,0,0,0,0,255,255,255,255,0,0,0,0,0,0,0,0,255,255,255,255,0,0,0,0,255,255,255,255,255,255,255,255,0,0,0,0,255,255,255,255,0,0,0,0,0,0,0,0,255,255,255,255,0,0,0,0,255,255,255,255]
-
-test2 :: IO (VSM.IOVector W.Word8)
-test2 = VS.thaw $ VS.fromList [0,0,0,0,255,255,255,255,0,0,0,0,255,255,255,255,255,255,255,255,0,0,0,0,255,255,255,255,0,0,0,0,0,0,0,0,255,255,255,255,0,0,0,0,255,255,255,255,255,255,255,255,0,0,0,0,255,255,255,255,0,0,0,0]
-
 convertToScreenData :: [W.Word8] -> IO (VSM.IOVector W.Word8)
 convertToScreenData screen = VS.thaw $ VS.fromList screen
-
-testScreenGame :: BS.ByteString
-testScreenGame = BS.pack [0xA0, 55, 0x60, 0x40, 0x61, 0x20, 0xD0, 0x15, 0xA0, 0, 0xD0, 0x15, 0x12, 0x0C]

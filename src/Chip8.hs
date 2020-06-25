@@ -16,6 +16,7 @@ import Control.Monad.ST
 import Control.Monad
 import SDL
 import SDL.Internal.Numbered
+import SDL.Mixer as Mixer
 import Utils
 import System.Random
 --import Debug.Trace --traceShowId
@@ -33,7 +34,8 @@ data ChipState = Chip {
                         keypad :: V.Vector Bool,  -- 16 keys
                         stack :: V.Vector W.Word16, -- 16 levels
                         memory :: V.Vector W.Word8, -- 4096 bytes
-                        seed :: StdGen
+                        seed :: StdGen,
+                        sound :: Chunk
                       } deriving (Show)
 
 instance Eq ChipState where
@@ -105,6 +107,7 @@ startChip :: IO ChipState
 startChip = do
   random <- newStdGen 
   startingTimer <- SDL.ticks 
+  sound <- Mixer.load "./sound.wav"
   return $ Chip {
         registers = V.replicate registersSize 0,
         index = 0, 
@@ -118,7 +121,8 @@ startChip = do
         keypad = V.replicate keypadSize False,
         stack = V.replicate stackSize 0,
         memory = V.concat [fontSet, V.replicate (memorySize - V.length fontSet) 0],
-        seed = random
+        seed = random,
+        sound = sound
        }
 
 run :: ChipState -> IO ChipState
@@ -137,17 +141,19 @@ updateTimers chip = do
     let oldTime = timer chip
         shouldUpdate = newTime > oldTime && newTime - tickDuration >= oldTime
       in  if shouldUpdate 
-          then return $ auxUpdateTimers newTime chip
+          then auxUpdateTimers newTime chip
           else return chip
 
-auxUpdateTimers :: W.Word32 -> ChipState -> ChipState
-auxUpdateTimers newTime chip =
+auxUpdateTimers :: W.Word32 -> ChipState -> IO ChipState
+auxUpdateTimers newTime chip = do
   let oldTime = timer chip
       updatedTimer = newTime - (newTime `mod` tickDuration)
       decrementValue = div (newTime - oldTime) tickDuration
+      oldSoundTimer = soundTimer chip
       newDelay = decrementTimer (delayTimer chip) decrementValue
       newSound = decrementTimer (soundTimer chip) decrementValue
-    in chip { timer = updatedTimer, delayTimer = newDelay, soundTimer = newSound }
+  when (oldSoundTimer /= 0 && newSound == 0) (play $ sound chip)
+  return $ chip { timer = updatedTimer, delayTimer = newDelay, soundTimer = newSound }
 
 decrementTimer :: (Ord a, Num a, Integral b) => a -> b -> a
 decrementTimer oldTimer decrementValue =
@@ -222,7 +228,7 @@ noOp :: ChipState -> ChipState
 noOp chip = chip { pc = pc chip + 2 }
 
 clearDisplayOp :: ChipState -> ChipState
-clearDisplayOp chip = chip { gfx = V.fromList $ replicate screenSize False, newScreen = True, pc = pc chip + 2 }
+clearDisplayOp chip = chip { gfx = V.replicate screenSize False, newScreen = True, pc = pc chip + 2 }
 
 returnOp :: ChipState -> ChipState
 returnOp chip = 
@@ -498,7 +504,6 @@ loadRegsFromMemoryOp opCode chip =
           pc = pc chip + 2
         }
 
-
 drawOp :: W.Word16 -> ChipState -> ChipState
 drawOp opCode chip = 
   chip { 
@@ -570,10 +575,5 @@ getScreen chip = if newScreen chip
     )
   else ([], chip)
 
-
 convertToBits :: W.Word8 -> [Bool]
 convertToBits x = map (testBit x) [7,6..0]
-
-boolTest :: [Bool]
-boolTest = [True,False,True,False,False,True,False,True,True,False,True,False,False,True,False,True]
-

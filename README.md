@@ -1,10 +1,23 @@
 # chip8
 
-A chip8 emulator written in haskell, sdl2 library for graphics and user input
+A chip8 emulator written in haskell, sdl2 library for graphics, sound and user input
 
-## TODO
- - [x] Capping frame rate
- - [x] Mutable vectors for performance
+## Usage
+
+The executable should be placed in the same folder as the games, the sound.wav file and the SDL2 libraries.
+The games, the sound file and the libraries for windows can be found in the resources folder.
+
+```sh
+$ chip8-exe TETRIS
+```
+
+## Build from source
+
+Building requires having [stack](https://docs.haskellstack.org/en/stable/README/) and the [SDL2](https://www.libsdl.org/download-2.0.php) and [SDL2-mixer](https://www.libsdl.org/projects/SDL_mixer/installed) libraries installed.
+
+```sh
+$ stack build
+```
 
 ## Resources
  - [SDL wiki](https://wiki.libsdl.org/)
