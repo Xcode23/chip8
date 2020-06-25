@@ -1,6 +1,6 @@
 module Chip8 
           (
-            ChipState(..),
+            ChipState(newScreen),
             startChip,
             getScreen,
             loadGame,
@@ -29,6 +29,7 @@ data ChipState = Chip {
                         pc :: W.Word16,
                         sp :: W.Word8,
                         gfx :: V.Vector Bool, -- 128x64
+                        newScreen :: Bool,
                         keypad :: V.Vector Bool,  -- 16 keys
                         stack :: V.Vector W.Word16, -- 16 levels
                         memory :: V.Vector W.Word8, -- 4096 bytes
@@ -113,6 +114,7 @@ startChip = do
         pc = gameStartAddress,
         sp = 0,
         gfx = V.replicate screenSize False,
+        newScreen = True,
         keypad = V.replicate keypadSize False,
         stack = V.replicate stackSize 0,
         memory = V.concat [fontSet, V.replicate (memorySize - V.length fontSet) 0],
@@ -220,7 +222,7 @@ noOp :: ChipState -> ChipState
 noOp chip = chip { pc = pc chip + 2 }
 
 clearDisplayOp :: ChipState -> ChipState
-clearDisplayOp chip = chip { gfx = V.fromList $ replicate screenSize False, pc = pc chip + 2 }
+clearDisplayOp chip = chip { gfx = V.fromList $ replicate screenSize False, newScreen = True, pc = pc chip + 2 }
 
 returnOp :: ChipState -> ChipState
 returnOp chip = 
@@ -501,6 +503,7 @@ drawOp :: W.Word16 -> ChipState -> ChipState
 drawOp opCode chip = 
   chip { 
     gfx = newScreen,
+    newScreen = True,
     registers = newRegisters,
     pc = pc chip + 2 
   }
@@ -559,8 +562,14 @@ accessStack chip index = readFromVector index $ stack chip
 accessKeypad :: Integral a => ChipState -> a -> Bool
 accessKeypad chip index = readFromVector index $ keypad chip
 
-getScreen :: ChipState -> [W.Word8]
-getScreen chip = concatMap (\x -> if x then replicate 4 255 else replicate 4 0) $ V.toList (gfx chip)
+getScreen :: ChipState -> ([W.Word8], ChipState)
+getScreen chip = if newScreen chip 
+  then (
+    concatMap (\x -> if x then replicate 4 255 else replicate 4 0) $ V.toList (gfx chip),
+    chip { newScreen = False }
+    )
+  else ([], chip)
+
 
 convertToBits :: W.Word8 -> [Bool]
 convertToBits x = map (testBit x) [7,6..0]

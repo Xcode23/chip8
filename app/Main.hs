@@ -36,12 +36,13 @@ mainLoop False chip accumulator renderer = do
   SDL.delay 1 -- slight delay to help controlTimings keep up
   pumpEvents
   keyState <- getKeyboardState
-  controlTimings (timer chip)
+  --controlTimings (timer chip)
   updatedChip <- run chip
   --printFps accumulator
-  screenData <- convertToScreenData $ getScreen updatedChip
-  updateScreen screenData renderer
-  mainLoop (keyState ScancodeEscape) updatedChip (accumulator+1) renderer
+  let updateFlag = newScreen updatedChip
+  let (screen, newChip) = getScreen updatedChip
+  when updateFlag (convertToScreenData screen >>= updateScreen renderer)
+  mainLoop (keyState ScancodeEscape) newChip (accumulator+1) renderer
 
 controlTimings :: W.Word32 -> IO ()
 controlTimings previousTicks = do
@@ -52,8 +53,8 @@ controlTimings previousTicks = do
                     maxIntendedDelay - tickDifference > 0                 -- checks that ticks difference is smaller than maxIntendedDelay
   when condition $ SDL.delay maxIntendedDelay
 
-updateScreen :: VSM.IOVector W.Word8 -> Renderer -> IO ()
-updateScreen screenData renderer = do
+updateScreen :: Renderer -> VSM.IOVector W.Word8 -> IO ()
+updateScreen renderer screenData = do
   surface <- createRGBSurfaceFrom screenData (V2 128 64) 512 RGBA8888 -- (V2 width height) width * 4
   texture <- createTextureFromSurface renderer surface
   clear renderer
